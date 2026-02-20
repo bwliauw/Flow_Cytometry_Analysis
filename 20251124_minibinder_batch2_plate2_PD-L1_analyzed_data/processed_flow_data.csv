@@ -1,0 +1,63 @@
+Sample Name,True Sample Name,Sample Type,Replicate,Cells/Singlets | Count,Cells/Singlets/a-FLAG_AF647(+) | Count,Cells/Singlets/a-FLAG_AF647(+) | Freq. of Parent (%),Cells/Singlets/a-FLAG_AF647(+) | Geometric Mean (R1-A :: miRFP-A),Cells/Singlets/a-FLAG_AF647(+) | Geometric Mean (B1-A :: AF488-A),Cells/Singlets/a-FLAG_AF647(+) | Geometric Mean (Ratio_AF488_AF647),Cells/Singlets/a-FLAG_AF647(+)/a-His_AF488(+) | Count,Cells/Singlets/a-FLAG_AF647(+)/a-His_AF488(+) | Freq. of Parent (%),Cells/Singlets/a-FLAG_AF647(+)/a-His_AF488(+) | Geometric Mean (R1-A :: miRFP-A),Cells/Singlets/a-FLAG_AF647(+)/a-His_AF488(+) | Geometric Mean (B1-A :: AF488-A),Cells/Singlets/a-FLAG_AF647(+)/a-His_AF488(+) | Geometric Mean (Ratio_AF488_AF647)
+BWL2025-11-24.0089.mqd,Mock Unlabeled,Negative Control,1,8647,9.0,0.1,7.88,8.25,1.05,1.0,11.1,2.17,118.0,54.3
+BWL2025-11-24.0090.mqd,Mock Unlabeled,Negative Control,1,19175,1.0,0.00522,5.92,3.53,0.6,0.0,0.0,,,
+BWL2025-11-24.0091.mqd,Mock Unlabeled,Negative Control,1,23690,6.0,0.025,2.84,16.3,5.73,0.0,0.0,,,
+BWL2025-11-24.0092.mqd,pdl1_sequence_10,Experimental Sample,1,4919,4300.0,87.4,20.3,7.5,0.37,29.0,0.67,11.5,40.3,3.5
+BWL2025-11-24.0093.mqd,pdl1_sequence_31,Experimental Sample,1,8067,7116.0,88.2,30.1,7.17,0.24,80.0,1.12,28.9,48.5,1.68
+BWL2025-11-24.0094.mqd,pdl1_sequence_68,Experimental Sample,1,5822,5338.0,91.7,27.2,7.96,0.29,54.0,1.01,39.2,41.5,1.06
+BWL2025-11-24.0095.mqd,pdl1_sequence_96,Experimental Sample,1,12390,9175.0,74.1,15.4,5.57,0.36,41.0,0.45,13.1,49.3,3.77
+BWL2025-11-24.0096.mqd,pdl1_sequence_118,Experimental Sample,1,15908,15428.0,97.0,25.2,5.43,0.22,42.0,0.27,17.8,49.6,2.79
+BWL2025-11-24.0097.mqd,a-His + TSHR-His,Positive Control,1,23007,4440.0,19.3,10.6,11.8,1.11,704.0,15.9,209.0,59.3,0.28
+BWL2025-11-24.0098.mqd,a-His + TSHR-His,Positive Control,1,24322,4987.0,20.5,9.89,10.6,1.07,647.0,13.0,232.0,61.4,0.27
+BWL2025-11-24.0099.mqd,a-His + TSHR-His,Positive Control,1,21776,3757.0,17.3,9.86,12.2,1.24,608.0,16.2,203.0,69.6,0.34
+BWL2025-11-24.0100.mqd,pdl1_sequence_11,Experimental Sample,1,13101,12250.0,93.5,33.2,6.22,0.19,73.0,0.6,56.6,50.5,0.89
+BWL2025-11-24.0101.mqd,pdl1_sequence_32,Experimental Sample,1,15170,13981.0,92.2,26.6,6.27,0.24,92.0,0.66,47.2,47.6,1.01
+BWL2025-11-24.0102.mqd,pdl1_sequence_73,Experimental Sample,1,24790,20106.0,81.1,13.0,5.18,0.4,60.0,0.3,14.3,50.1,3.5
+BWL2025-11-24.0103.mqd,pdl1_sequence_98,Experimental Sample,1,27740,8408.0,30.3,10.7,5.54,0.52,41.0,0.49,11.7,53.4,4.55
+BWL2025-11-24.0104.mqd,pdl1_sequence_119,Experimental Sample,1,20738,17698.0,85.3,14.9,5.37,0.36,48.0,0.27,33.8,45.7,1.35
+BWL2025-11-24.0105.mqd,K1-70 + TSHR,Positive Control,1,19522,17912.0,91.8,20.4,8.12,0.4,1181.0,6.59,884.0,80.2,0.091
+BWL2025-11-24.0106.mqd,K1-70 + TSHR,Positive Control,1,16690,16271.0,97.5,43.1,9.22,0.21,1312.0,8.06,1097.0,74.7,0.068
+BWL2025-11-24.0107.mqd,K1-70 + TSHR,Positive Control,1,19276,18509.0,96.0,28.5,8.56,0.3,1207.0,6.52,1016.0,80.8,0.079
+BWL2025-11-24.0108.mqd,pdl1_sequence_15,Experimental Sample,1,9245,9038.0,97.8,53.0,5.7,0.11,44.0,0.49,108.0,51.7,0.48
+BWL2025-11-24.0109.mqd,pdl1_sequence_33,Experimental Sample,1,14924,12731.0,85.3,14.5,5.87,0.4,57.0,0.45,24.9,48.0,1.93
+BWL2025-11-24.0110.mqd,pdl1_sequence_74,Experimental Sample,1,13093,12286.0,93.8,31.3,6.07,0.19,72.0,0.59,56.3,50.0,0.89
+BWL2025-11-24.0111.mqd,pdl1_sequence_104,Experimental Sample,1,14000,13443.0,96.0,36.1,5.39,0.15,42.0,0.31,77.3,52.8,0.68
+BWL2025-11-24.0112.mqd,pdl1_sequence_120,Experimental Sample,1,19243,7435.0,38.6,9.17,5.47,0.6,39.0,0.52,10.8,49.0,4.55
+BWL2025-11-24.0113.mqd,PDL1_b4,Positive Control,1,20504,4431.0,21.6,9.41,5.59,0.59,19.0,0.43,8.28,49.0,5.92
+BWL2025-11-24.0114.mqd,PDL1_b4,Positive Control,1,25628,4488.0,17.5,9.72,5.25,0.54,16.0,0.36,3.83,46.7,12.2
+BWL2025-11-24.0115.mqd,PDL1_b4,Positive Control,1,18746,1612.0,8.6,9.64,5.58,0.58,15.0,0.93,4.47,46.7,10.4
+BWL2025-11-24.0116.mqd,pdl1_sequence_18,Experimental Sample,1,21870,19611.0,89.7,17.4,5.22,0.3,66.0,0.34,29.8,47.0,1.57
+BWL2025-11-24.0117.mqd,pdl1_sequence_36,Experimental Sample,1,21428,7336.0,34.2,16.2,5.07,0.31,28.0,0.38,8.42,49.3,5.85
+BWL2025-11-24.0118.mqd,pdl1_sequence_77,Experimental Sample,1,18244,16134.0,88.4,16.7,4.84,0.29,35.0,0.22,23.6,45.2,1.91
+BWL2025-11-24.0119.mqd,pdl1_sequence_105,Experimental Sample,1,27913,24770.0,88.7,15.4,4.63,0.3,69.0,0.28,21.9,52.4,2.39
+BWL2025-11-24.0120.mqd,pdl1_sequence_121,Experimental Sample,1,21506,20771.0,96.6,36.7,4.81,0.13,55.0,0.26,89.8,51.2,0.57
+BWL2025-11-24.0121.mqd,PDL1_b201,Positive Control,1,17252,3882.0,22.5,9.87,5.75,0.58,25.0,0.64,5.8,48.2,8.31
+BWL2025-11-24.0122.mqd,PDL1_b201,Positive Control,1,25138,3757.0,14.9,10.2,5.48,0.54,19.0,0.51,5.79,42.1,7.27
+BWL2025-11-24.0123.mqd,PDL1_b201,Positive Control,1,22949,2379.0,10.4,10.1,5.53,0.55,18.0,0.76,4.4,45.5,10.3
+BWL2025-11-24.0124.mqd,pdl1_sequence_19,Experimental Sample,1,21462,18477.0,86.1,13.6,4.81,0.35,35.0,0.19,11.1,46.9,4.23
+BWL2025-11-24.0125.mqd,pdl1_sequence_38,Experimental Sample,1,23046,17727.0,76.9,10.3,5.55,0.54,86.0,0.49,11.0,49.4,4.48
+BWL2025-11-24.0126.mqd,pdl1_sequence_81,Experimental Sample,1,20126,8137.0,40.4,9.02,5.53,0.61,38.0,0.47,13.7,47.0,3.44
+BWL2025-11-24.0127.mqd,pdl1_sequence_106,Experimental Sample,1,16804,15525.0,92.4,20.9,5.57,0.27,60.0,0.39,41.6,45.9,1.1
+BWL2025-11-24.0128.mqd,pdl1_sequence_122,Experimental Sample,1,22250,20221.0,90.9,16.7,5.11,0.31,40.0,0.2,21.0,41.6,1.98
+BWL2025-11-24.0129.mqd,FLAG + TSHR,Negative Control,1,26662,13764.0,51.6,9.85,5.22,0.53,41.0,0.3,9.08,54.4,5.99
+BWL2025-11-24.0130.mqd,FLAG + TSHR,Negative Control,1,25740,13814.0,53.7,9.83,5.26,0.53,39.0,0.28,11.5,51.2,4.44
+BWL2025-11-24.0131.mqd,FLAG + TSHR,Negative Control,1,25046,14966.0,59.8,9.71,5.27,0.54,43.0,0.29,11.7,58.4,5.0
+BWL2025-11-24.0132.mqd,pdl1_sequence_23,Experimental Sample,1,20201,13789.0,68.3,10.7,5.06,0.47,32.0,0.23,19.7,49.6,2.52
+BWL2025-11-24.0133.mqd,pdl1_sequence_43,Experimental Sample,1,24932,17274.0,69.3,9.58,5.1,0.53,34.0,0.2,11.0,46.6,4.25
+BWL2025-11-24.0134.mqd,pdl1_sequence_91,Experimental Sample,1,17130,10939.0,63.9,10.5,5.88,0.56,41.0,0.37,7.99,41.6,5.21
+BWL2025-11-24.0135.mqd,pdl1_sequence_111,Experimental Sample,1,19727,17317.0,87.8,15.3,5.43,0.35,52.0,0.3,20.7,46.0,2.22
+BWL2025-11-24.0136.mqd,Mock + FLAG(AF647),Negative Control,1,30193,129.0,0.43,11.0,5.41,0.49,2.0,1.55,7.18,34.1,4.75
+BWL2025-11-24.0137.mqd,FLAG-tag + PDL1,Negative Control,1,19386,10280.0,53.0,9.8,5.2,0.53,26.0,0.25,12.8,41.2,3.22
+BWL2025-11-24.0138.mqd,FLAG-tag + PDL1,Negative Control,1,21690,10532.0,48.6,9.4,5.18,0.55,38.0,0.36,10.8,46.2,4.27
+BWL2025-11-24.0139.mqd,FLAG-tag + PDL1,Negative Control,1,24394,14890.0,61.0,9.76,5.24,0.54,41.0,0.28,9.89,50.2,5.08
+BWL2025-11-24.0140.mqd,pdl1_sequence_24,Experimental Sample,1,19513,17978.0,92.1,18.1,5.06,0.28,46.0,0.26,31.3,49.7,1.59
+BWL2025-11-24.0141.mqd,pdl1_sequence_53,Experimental Sample,1,17519,15662.0,89.4,15.8,5.24,0.33,31.0,0.2,29.3,48.3,1.65
+BWL2025-11-24.0142.mqd,pdl1_sequence_92,Experimental Sample,1,18830,15255.0,81.0,12.7,5.68,0.45,51.0,0.33,14.2,44.3,3.12
+BWL2025-11-24.0143.mqd,pdl1_sequence_114,Experimental Sample,1,16342,14858.0,90.9,19.7,5.43,0.28,76.0,0.51,39.1,49.3,1.26
+BWL2025-11-24.0144.mqd,Mock + FLAG(AF647),Negative Control,1,33521,101.0,0.3,10.3,6.28,0.61,0.0,0.0,,,
+BWL2025-11-24.0145.mqd,Mock + His(AF488),Negative Control,1,28109,21.0,0.075,9.4,9.31,0.99,4.0,19.0,5.59,44.2,7.9
+BWL2025-11-24.0146.mqd,Mock + His(AF488),Negative Control,1,28194,22.0,0.078,11.0,6.73,0.61,1.0,4.55,1267.0,48.5,0.038
+BWL2025-11-24.0147.mqd,pdl1_sequence_28,Experimental Sample,1,18964,17413.0,91.8,17.1,5.17,0.3,52.0,0.3,24.6,42.1,1.72
+BWL2025-11-24.0148.mqd,pdl1_sequence_62,Experimental Sample,1,10142,7618.0,75.1,15.4,8.66,0.56,59.0,0.77,19.8,40.4,2.04
+BWL2025-11-24.0149.mqd,pdl1_sequence_93,Experimental Sample,1,15530,12829.0,82.6,12.7,5.46,0.43,43.0,0.34,22.4,44.3,1.97
+BWL2025-11-24.0150.mqd,pdl1_sequence_117,Experimental Sample,2,16680,15868.0,95.1,20.2,5.04,0.25,45.0,0.28,15.7,44.0,2.8
