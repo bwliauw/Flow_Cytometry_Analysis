@@ -7,13 +7,12 @@ This repository contains Python scripts to process FlowJo-exported CSV data, mer
 - [Big-Picture Overview](#big-picture-overview)
 - [Scripts](#scripts)
   - [`analyze_flow.py`](#analyze_flowpy)
-  - [`analyze_flow_V2.py`](#analyze_flow_v2py)
 - [Data Requirements](#data-requirements)
   - [Input Data Type](#input-data-type)
   - [Required Inputs Per Run](#required-inputs-per-run)
   - [Raw CSV Expectations](#raw-csv-expectations)
   - [Mapping CSV Expectations](#mapping-csv-expectations)
-- [`analyze_flow_V2.py`: Step-by-Step Pipeline](#analyze_flow_v2py-step-by-step-pipeline)
+- [`analyze_flow.py`: Step-by-Step Pipeline](#analyze_flowpy-step-by-step-pipeline)
 - [Output Files Per Run](#output-files-per-run)
 - [Running the Script](#running-the-script)
 - [Troubleshooting](#troubleshooting)
@@ -21,7 +20,7 @@ This repository contains Python scripts to process FlowJo-exported CSV data, mer
 
 ## Big-Picture Overview
 
-The workflow is designed for experiments where each row is a sample (often with replicates), and FlowJo exports many metric columns per sample. The scripts:
+The workflow is designed for experiments where each row is a sample (often with replicates), and FlowJo exports many metric columns per sample. The script:
 
 1. Find the required raw CSV and plate mapping CSV.
 2. Clean known artifact rows from raw data (`Mean`, `SD`).
@@ -33,22 +32,13 @@ The workflow is designed for experiments where each row is a sample (often with 
 ## Scripts
 
 ### `analyze_flow.py`
-- Original/primary implementation of the analysis pipeline.
+- Single production script for the complete analysis workflow.
 - Includes robust handling for:
   - input file discovery,
   - mapping-column normalization/validation,
   - threshold calculations,
   - plotting and markdown report generation.
 - Produces standardized outputs in a project-local folder named `<input_folder>_analyzed_data`.
-
-### `analyze_flow_V2.py`
-- Optimized/refactored standalone version with the same analysis behavior and output structure.
-- Organized into clearer helper functions for easier debugging and future optimization:
-  - file discovery,
-  - merge/clean logic,
-  - aggregation,
-  - plotting,
-  - report writing.
 
 ## Data Requirements
 
@@ -76,7 +66,7 @@ The workflow is designed for experiments where each row is a sample (often with 
   - `Sample Type` (e.g., Negative Control, Positive Control, Experimental Sample)
   - `Replicate`
 
-## `analyze_flow_V2.py`: Step-by-Step Pipeline
+## `analyze_flow.py`: Step-by-Step Pipeline
 
 1. **Resolve Output Directory**
    - Creates `<input_folder>_analyzed_data` in the project root if needed.
@@ -170,13 +160,13 @@ Inside `<input_folder>_analyzed_data`:
 Example:
 
 ```bash
-python3 analyze_flow_V2.py "/absolute/path/to/data_folder"
+python3 analyze_flow.py "/absolute/path/to/data_folder"
 ```
 
 Optional flag (retained for CLI compatibility):
 
 ```bash
-python3 analyze_flow_V2.py "/absolute/path/to/data_folder" --export-png
+python3 analyze_flow.py "/absolute/path/to/data_folder" --export-png
 ```
 
 Note: PNG export is already performed by default in the current implementation.
