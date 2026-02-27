@@ -7,6 +7,7 @@ This repository contains Python scripts to process FlowJo-exported CSV data, mer
 - [Big-Picture Overview](#big-picture-overview)
 - [Scripts](#scripts)
   - [`analyze_flow.py`](#analyze_flowpy)
+  - [`analyze_flow_anonymous.py`](#analyze_flow_anonymouspy)
 - [Data Requirements](#data-requirements)
   - [Input Data Type](#input-data-type)
   - [Required Inputs Per Run](#required-inputs-per-run)
@@ -39,6 +40,12 @@ The workflow is designed for experiments where each row is a sample (often with 
   - threshold calculations,
   - plotting and markdown report generation.
 - Produces standardized outputs in a project-local folder named `<input_folder>_analyzed_data`.
+
+### `analyze_flow_anonymous.py`
+- Anonymous variant of `analyze_flow.py` for shareable outputs.
+- Uses the same core processing, merging, aggregation, thresholds, and report generation logic.
+- Removes sample-name labels from generated figures (x-axis labels are suppressed).
+- Intended for workflows where sample identities are anonymized in mapping/output files (for example, `Positive Control 1`, `Negative Control 1`, `Anonymous_1`).
 
 ## Data Requirements
 
@@ -163,6 +170,12 @@ Example:
 python3 analyze_flow.py "/absolute/path/to/data_folder"
 ```
 
+Anonymous variant:
+
+```bash
+python3 analyze_flow_anonymous.py "/absolute/path/to/data_folder"
+```
+
 Optional flag (retained for CLI compatibility):
 
 ```bash
@@ -219,6 +232,11 @@ Note: PNG export is already performed by default in the current implementation.
 ### 7) Script runs but output folder is not where expected
 - **Behavior:** Output is always written to the project folder (same folder as script), named `<input_folder>_analyzed_data`.
 - **Fix:** Check the project root for the generated folder name derived from the basename of your `data_dir`.
+
+### 8) Positive/Negative control naming conventions do not match your experiment
+- **Cause:** Parts of thresholding and control ordering rely on benchmark naming conventions used in the original workflow (for example, mock/FLAG/His-style control-name matching).
+- **Impact:** Thresholds and figure ordering may be incorrect if your control names do not follow expected patterns.
+- **Fix:** Update control/sample naming conventions in your mapping data and/or adjust the script’s name-matching logic so benchmark/threshold detection matches your protein/control system.
 
 ## Quick Diagnostic Checklist
 
