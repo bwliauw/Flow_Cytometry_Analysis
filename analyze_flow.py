@@ -1,4 +1,7 @@
-"""Flow cytometry analysis pipeline.
+"""Optimized standalone V2 flow cytometry analysis script.
+
+This version keeps behavior/output equivalent to `analyze_flow.py` while
+reducing duplication and improving maintainability.
 
 This script takes a directory containing two CSV inputs:
 1) Raw FlowJo-exported results.
@@ -18,25 +21,53 @@ Core responsibilities:
 - Render consistently ordered figures with styling and threshold overlays.
 """
 
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
-import seaborn as sns
-import os
 import argparse
+import os
+
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+from matplotlib.patches import Patch
 
 REQUIRED_METRIC_KEYS = ("percent_parent", "mfi_ratio", "mfi_af488", "mirfp_expression")
 REQUIRED_MAPPING_COLUMNS = ("Sample Name", "Updated Sample Name", "Sample Type", "Replicate")
 
+COLOR_MAP = {
+    "Negative Control": "#D3D3D3",
+    "Positive Control": "#FFB6C1",
+    "Experimental Sample": "#ADD8E6",
+}
+
+METRIC_CONFIGS = [
+    {
+        "metric_id": "percent_parent",
+        "title": "Binding Competent Population (%Parent)",
+        "y_label": "Mean Binding Competent Population (%Parent)",
+        "filename": "percent_parent_plot.png",
+    },
+    {
+        "metric_id": "mirfp_expression",
+        "title": "Expression Level of Transfected Cells MFI_AF647",
+        "y_label": "Expression Level (MFI_AF647)",
+        "filename": "mirfp_expression_plot.png",
+    },
+    {
+        "metric_id": "mfi_ratio",
+        "title": "Binding Competent Population Single-Cell Ratio of AF488/AF647",
+        "y_label": "MFI (AF488/AF647)",
+        "filename": "mfi_ratio_plot.png",
+    },
+    {
+        "metric_id": "mfi_af488",
+        "title": "Binding Competent Population MFI_AF488",
+        "y_label": "MFI (AF488)",
+        "filename": "mfi_af488_plot.png",
+    },
+]
+
 
 def get_output_dir(data_dir):
-    """Return/create the project-local output directory for a given dataset path.
-
-    The output folder name is derived from the input folder name:
-    `<input_folder>_analyzed_data`
-    and is always created inside the same directory as this script.
-    """
+    """Build the project-local output directory for a given input dataset folder."""
     input_dir = os.path.abspath(os.path.normpath(data_dir))
     input_name = os.path.basename(input_dir)
     project_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,75 +76,93 @@ def get_output_dir(data_dir):
     return output_dir
 
 
+def _pick_csvs_from_dir(dir_path):
+    """Find candidate raw + mapping CSV files in a single directory."""
+    raw_csv = None
+    mapping_csv = None
+    for name in os.listdir(dir_path):
+        if not name.endswith(".csv"):
+            continue
+        lower_name = name.lower()
+        if "plate_mapping" in lower_name and mapping_csv is None:
+            mapping_csv = os.path.join(dir_path, name)
+        elif raw_csv is None and (
+            "flowjo table" in lower_name
+            or "ratio_reanalysis" in lower_name
+            or "reanaly" in lower_name
+        ):
+            raw_csv = os.path.join(dir_path, name)
+    return raw_csv, mapping_csv
+
+
+def find_input_csvs(data_dir):
+    """Locate required CSVs in `data_dir` or one nested level below it."""
+    # First, try the provided directory directly.
+    raw_csv, mapping_csv = _pick_csvs_from_dir(data_dir)
+    if raw_csv and mapping_csv:
+        return raw_csv, mapping_csv
+
+    # Fallback: search immediate child folders (common for archived exports).
+    for child in os.listdir(data_dir):
+        child_path = os.path.join(data_dir, child)
+        if not os.path.isdir(child_path):
+            continue
+        raw_csv, mapping_csv = _pick_csvs_from_dir(child_path)
+        if raw_csv and mapping_csv:
+            return raw_csv, mapping_csv
+
+    raise FileNotFoundError(f"Could not find required CSV files in {data_dir}")
+
+
+def _normalize_column_name(name):
+    """Normalize column names so minor formatting differences still match."""
+    return "".join(ch for ch in str(name).strip().lower() if ch.isalnum())
+
+
+def resolve_mapping_columns(mapping_columns):
+    """Resolve mapping headers to canonical names expected by downstream logic."""
+    normalized = {_normalize_column_name(col): col for col in mapping_columns}
+    required_norm = {_normalize_column_name(col): col for col in REQUIRED_MAPPING_COLUMNS}
+
+    resolved = {}
+    missing = []
+    for norm_required, canonical in required_norm.items():
+        matched_col = normalized.get(norm_required)
+        if matched_col is None:
+            missing.append(canonical)
+        else:
+            resolved[canonical] = matched_col
+
+    # Build an actionable error message when required mapping metadata is missing.
+    if missing:
+        available_preview = ", ".join([str(col) for col in mapping_columns])
+        raise ValueError(
+            "Mapping CSV is missing required columns. "
+            f"Missing: {', '.join(missing)}. "
+            f"Available columns: {available_preview}"
+        )
+
+    return resolved
+
+
 def clean_and_merge(data_dir, output_dir):
-    """Load raw + mapping CSVs, clean artifacts, merge metadata, and export CSV.
-
-    Steps:
-    - Discover raw and mapping CSVs (top-level first, then one nested level).
-    - Remove known artifact rows ("Mean", "SD") from raw data.
-    - Normalize/validate required mapping columns.
-    - Left-merge mapping metadata onto each raw sample row.
-    - Fail explicitly if any sample lacks required metadata.
-    - Reformat columns for the exported intermediate CSV.
-    """
-    # 1. Locate files
-    files = os.listdir(data_dir)
-
-    def pick_csvs_from_dir(dir_path):
-        """Pick the first matching raw and mapping CSV from a directory.
-
-        Matching is intentionally flexible for raw file names to handle
-        naming differences across exports (FlowJo table / ratio reanalysis).
-        """
-        local_raw = None
-        local_mapping = None
-        for name in os.listdir(dir_path):
-            if name.endswith(".csv"):
-                lower_name = name.lower()
-                if "plate_mapping" in lower_name and local_mapping is None:
-                    local_mapping = os.path.join(dir_path, name)
-                elif local_raw is None and (
-                    "flowjo table" in lower_name
-                    or "ratio_reanalysis" in lower_name
-                    or "reanaly" in lower_name
-                ):
-                    local_raw = os.path.join(dir_path, name)
-        return local_raw, local_mapping
-
-    raw_csv, mapping_csv = pick_csvs_from_dir(data_dir)
-    if not raw_csv or not mapping_csv:
-        for child in files:
-            child_path = os.path.join(data_dir, child)
-            if os.path.isdir(child_path):
-                nested_raw, nested_mapping = pick_csvs_from_dir(child_path)
-                if nested_raw and nested_mapping:
-                    raw_csv, mapping_csv = nested_raw, nested_mapping
-                    break
-    
-    if not raw_csv or not mapping_csv:
-        raise FileNotFoundError(f"Could not find required CSV files in {data_dir}")
-    
+    """Load raw/mapping CSVs, clean artifacts, merge metadata, and export merged CSV."""
+    raw_csv, mapping_csv = find_input_csvs(data_dir)
     print(f"Loading raw data from: {raw_csv}")
     print(f"Loading mapping from: {mapping_csv}")
-    
-    # 2. Load and clean raw data
-    # The first column is sample names, remaining are outputs
+
+    # The first raw column is treated as sample identifier regardless of its header text.
     raw_df = pd.read_csv(raw_csv)
-    
-    # Remove "Mean" and "SD" rows (last two rows usually, but let's be safe)
-    # The user said: "The last two rows contain artifact values of 'mean' and 'SD'"
-    # We can filter by checking if the first column contains "Mean" or "SD"
     sample_col = raw_df.columns[0]
+
+    # Remove FlowJo artifact summary rows and empty sample rows.
     normalized_sample_names = raw_df[sample_col].astype(str).str.strip().str.lower()
     raw_df = raw_df[~normalized_sample_names.isin(["mean", "sd"])]
-    # Also remove any trailing empty rows if they exist
     raw_df = raw_df.dropna(subset=[sample_col])
-    
-    # 3. Load mapping data
+
+    # Standardize mapping column names so all downstream code uses stable keys.
     mapping_df = pd.read_csv(mapping_csv)
     mapping_col_map = resolve_mapping_columns(mapping_df.columns)
-
-    # Rename resolved mapping columns to canonical names so downstream code is stable.
     mapping_df = mapping_df.rename(
         columns={
             mapping_col_map["Sample Name"]: "Sample Name",
@@ -122,20 +171,17 @@ def clean_and_merge(data_dir, output_dir):
             mapping_col_map["Replicate"]: "Replicate",
         }
     )
-    
-    # 4. Merge
-    # We'll merge on the first column of raw_df and 'Sample Name' in mapping_df
-    # Left join preserves every raw row so analysis never silently drops
-    # a sample that appeared in the instrument export.
+
+    # Left join keeps every raw sample row; we fail fast on missing mapping metadata below.
     merged_df = pd.merge(
-        raw_df, 
-        mapping_df, 
-        left_on=sample_col, 
-        right_on='Sample Name', 
-        how='left'
+        raw_df,
+        mapping_df,
+        left_on=sample_col,
+        right_on="Sample Name",
+        how="left",
     )
 
-    # Fail fast if any raw sample was not mapped; otherwise groupby would silently drop NaN keys.
+    # Explicitly fail on unmatched samples to avoid silent drops in later groupby operations.
     unmatched_mask = (
         merged_df["Updated Sample Name"].isna()
         | merged_df["Sample Type"].isna()
@@ -155,115 +201,62 @@ def clean_and_merge(data_dir, output_dir):
             f"Unmatched samples ({len(unmatched_samples)}): {preview}{suffix}"
         )
 
-    # Keep raw sample IDs in the first column and remove duplicated merge key from mapping table.
+    # Keep the raw sample identifier column first and avoid duplicate merge-key columns.
     if sample_col != "Sample Name":
         merged_df = merged_df.drop(columns=["Sample Name"], errors="ignore")
         merged_df = merged_df.rename(columns={sample_col: "Sample Name"})
 
-    # Rename column for user-facing clarity.
+    # User-facing naming convention.
     merged_df = merged_df.rename(columns={"Updated Sample Name": "True Sample Name"})
 
-    # Remove unused export columns from FlowJo and preserve meaningful data columns.
+    # Drop FlowJo placeholder columns with no analysis value.
     drop_unnamed_cols = [col for col in merged_df.columns if str(col).startswith("Unnamed:")]
     if drop_unnamed_cols:
         merged_df = merged_df.drop(columns=drop_unnamed_cols, errors="ignore")
 
-    # Ensure metadata columns are front-loaded in the output CSV.
-    # This keeps the exported table human-readable and consistent between runs.
+    # Front-load metadata columns to make exported CSV easier to inspect manually.
     leading_cols = ["Sample Name", "True Sample Name", "Sample Type", "Replicate"]
     remaining_cols = [col for col in merged_df.columns if col not in leading_cols]
     merged_df = merged_df[leading_cols + remaining_cols]
-    
-    # Save intermediate CSV
+
     output_path = os.path.join(output_dir, "processed_flow_data.csv")
     merged_df.to_csv(output_path, index=False)
     print(f"Saved merged data to {output_path}")
-    
+
     return merged_df
 
+
 def identify_columns(df):
-    """Identify FlowJo metric columns using pattern-based matching.
-
-    Returns:
-        dict with canonical keys:
-          - percent_parent
-          - mfi_ratio
-          - mfi_af488
-          - mirfp_expression
-
-    The script uses canonical keys downstream so analysis logic is independent
-    from exact raw CSV column ordering.
-    """
+    """Discover required metric columns using robust pattern matching."""
     cols = df.columns
     target_cols = {}
-    
-    # 1) Singlets/AF647(+)/AF488(+) %Parent
-    # Pattern: Freq. of Parent (%)
-    parent_match = [c for c in cols if 'Freq. of Parent (%)' in str(c) and 'AF488(+)' in str(c)]
-    if parent_match:
-        target_cols['percent_parent'] = parent_match[-1] # Usually the more specific one
-    
-    # 2) Singlets/AF647(+)/AF488(+) MFI_(AF488/AF647) single-cell ratio
-    # Pattern: Ratio_AF488_AF647
-    ratio_match = [c for c in cols if 'Ratio_AF488_AF647' in str(c)]
-    if ratio_match:
-        target_cols['mfi_ratio'] = ratio_match[-1]
-        
-    # 3) Singlets/AF647(+)/AF488(+) MFI_AF488
-    # Pattern: AF488-A
-    af488_match = [c for c in cols if 'AF488-A' in str(c) and 'AF488(+)' in str(c)]
-    if af488_match:
-        target_cols['mfi_af488'] = af488_match[-1]
 
-    # 4) Singlets/AF647(+) Geometric Mean (R1-A :: miRFP-A)
+    parent_match = [c for c in cols if "Freq. of Parent (%)" in str(c) and "AF488(+)" in str(c)]
+    ratio_match = [c for c in cols if "Ratio_AF488_AF647" in str(c)]
+    af488_match = [c for c in cols if "AF488-A" in str(c) and "AF488(+)" in str(c)]
     mirfp_match = [
-        c for c in cols
+        c
+        for c in cols
         if "a-FLAG_AF647(+)" in str(c)
         and "Geometric Mean (R1-A :: miRFP-A)" in str(c)
         and "/a-His_AF488(+)" not in str(c)
     ]
+
+    # Use the last match to prefer the most specific column when multiple match patterns.
+    if parent_match:
+        target_cols["percent_parent"] = parent_match[-1]
+    if ratio_match:
+        target_cols["mfi_ratio"] = ratio_match[-1]
+    if af488_match:
+        target_cols["mfi_af488"] = af488_match[-1]
     if mirfp_match:
         target_cols["mirfp_expression"] = mirfp_match[-1]
-        
+
     return target_cols
 
 
-def _normalize_column_name(name):
-    """Normalize a column name to alphanumeric lowercase for fuzzy matching."""
-    return "".join(ch for ch in str(name).strip().lower() if ch.isalnum())
-
-
-def resolve_mapping_columns(mapping_columns):
-    """Resolve required mapping columns even with spacing/case differences.
-
-    Example: " Updated Sample Name " and "updatedsamplename" both normalize
-    to the same key and can be matched reliably.
-    """
-    normalized = {_normalize_column_name(col): col for col in mapping_columns}
-    required_norm = {_normalize_column_name(col): col for col in REQUIRED_MAPPING_COLUMNS}
-
-    resolved = {}
-    missing = []
-    for norm_required, canonical in required_norm.items():
-        matched_col = normalized.get(norm_required)
-        if matched_col is None:
-            missing.append(canonical)
-        else:
-            resolved[canonical] = matched_col
-
-    if missing:
-        available_preview = ", ".join([str(col) for col in mapping_columns])
-        raise ValueError(
-            "Mapping CSV is missing required columns. "
-            f"Missing: {', '.join(missing)}. "
-            f"Available columns: {available_preview}"
-        )
-
-    return resolved
-
-
 def validate_target_columns(target_cols, available_columns):
-    """Ensure all required metrics were discovered before analysis proceeds."""
+    """Verify all required metric keys were discovered before analysis proceeds."""
     missing = [key for key in REQUIRED_METRIC_KEYS if key not in target_cols]
     if not missing:
         return
@@ -277,12 +270,14 @@ def validate_target_columns(target_cols, available_columns):
         f"Available columns: {available_preview}"
     )
 
+
 def get_sem(x):
-    """Compute standard error of the mean (SEM); 0 when only one replicate."""
+    """Compute standard error of the mean; return 0 for singleton groups."""
     return x.std() / np.sqrt(len(x)) if len(x) > 1 else 0
 
+
 def _sample_type_rank(sample_type):
-    """Sort key for global plot ordering: Negative, Positive, Experimental."""
+    """Sort rank to keep plot groups ordered: Negative -> Positive -> Experimental."""
     sample_type_norm = str(sample_type).strip().lower()
     if "negative" in sample_type_norm:
         return 0
@@ -292,7 +287,7 @@ def _sample_type_rank(sample_type):
 
 
 def _positive_control_rank(sample_name):
-    """Secondary sort key for positive controls to keep expected visual order."""
+    """Secondary ordering within positives to keep controls visually consistent."""
     sample_name_norm = str(sample_name).strip().lower()
     if "a-his" in sample_name_norm:
         return 0
@@ -302,18 +297,12 @@ def _positive_control_rank(sample_name):
 
 
 def calculate_mock_expression_threshold(df, target_cols):
-    """Compute expression threshold = 2x mean(mock_His/mock_FLAG expression).
-
-    Search order:
-    1) "Sample Name"
-    2) "True Sample Name" (fallback if no matches in #1)
-    """
+    """Compute expression threshold: 2x mean of mock_His/mock_FLAG expression."""
     expression_col = target_cols["mirfp_expression"]
     expression_values = pd.to_numeric(df[expression_col], errors="coerce")
-    sample_names = df["Sample Name"].astype(str)
 
     def build_mock_mask(name_series):
-        """True for names containing "mock" and at least one of "his"/"flag"."""
+        # Case-insensitive marker filter requested by user.
         return (
             name_series.str.contains("mock", case=False, na=False)
             & (
@@ -322,13 +311,12 @@ def calculate_mock_expression_threshold(df, target_cols):
             )
         )
 
-    mock_with_marker_mask = build_mock_mask(sample_names)
+    # Fallback to True Sample Name if mock markers are absent in raw Sample Name.
+    mock_with_marker_mask = build_mock_mask(df["Sample Name"].astype(str))
     if not mock_with_marker_mask.any() and "True Sample Name" in df.columns:
-        true_sample_names = df["True Sample Name"].astype(str)
-        mock_with_marker_mask = build_mock_mask(true_sample_names)
+        mock_with_marker_mask = build_mock_mask(df["True Sample Name"].astype(str))
 
-    mock_marker_values = expression_values[mock_with_marker_mask]
-    mock_marker_mean = mock_marker_values.mean()
+    mock_marker_mean = expression_values[mock_with_marker_mask].mean()
     if pd.isna(mock_marker_mean):
         raise ValueError(
             "Could not compute mock expression threshold because no valid mock_His/mock_FLAG "
@@ -338,45 +326,33 @@ def calculate_mock_expression_threshold(df, target_cols):
 
 
 def calculate_percent_parent_threshold(plot_data):
-    """Compute key-findings threshold = 2x best non-mock FLAG %Parent mean.
-
-    If no qualifying non-mock FLAG sample exists, return None.
-    """
-    true_sample_names = plot_data["Sample Name"].astype(str)
-
-    # Primary rule: use True Sample Name values containing FLAG but not mock.
+    """Compute 2x threshold from strongest non-mock FLAG %Parent control group."""
+    sample_names = plot_data["Sample Name"].astype(str)
     flag_non_mock = plot_data[
-        true_sample_names.str.contains("flag", case=False, na=False)
-        & ~true_sample_names.str.contains("mock", case=False, na=False)
+        sample_names.str.contains("flag", case=False, na=False)
+        & ~sample_names.str.contains("mock", case=False, na=False)
     ]
-    if not flag_non_mock.empty:
-        flag_group_means = (
-            flag_non_mock.groupby("Sample Name", sort=False)["percent_parent_mean"]
-            .mean()
-            .sort_values(ascending=False)
-        )
-        if not flag_group_means.empty:
-            return float(flag_group_means.iloc[0]) * 2.0
+    if flag_non_mock.empty:
+        return None
 
-    return None
+    flag_group_means = (
+        flag_non_mock.groupby("Sample Name", sort=False)["percent_parent_mean"]
+        .mean()
+        .sort_values(ascending=False)
+    )
+    if flag_group_means.empty:
+        return None
+    return float(flag_group_means.iloc[0]) * 2.0
 
 
 def calculate_percent_parent_plot_threshold(plot_data):
-    """Compute plotting threshold for %Parent horizontal reference line.
-
-    Preference:
-    1) Use non-mock FLAG threshold (same logic as key findings)
-    2) Fallback to strongest mock group threshold for visual guidance
-    """
-    # Prefer FLAG-based threshold for plotting.
+    """Plot threshold for %Parent; fallback to strongest mock group when needed."""
     flag_threshold = calculate_percent_parent_threshold(plot_data)
     if flag_threshold is not None:
         return flag_threshold
 
-    # Fallback rule: when only mock-labeled controls are present, choose the mock group
-    # with the higher mean and use it to derive the threshold.
-    true_sample_names = plot_data["Sample Name"].astype(str)
-    mock_rows = plot_data[true_sample_names.str.contains("mock", case=False, na=False)]
+    sample_names = plot_data["Sample Name"].astype(str)
+    mock_rows = plot_data[sample_names.str.contains("mock", case=False, na=False)]
     if mock_rows.empty:
         return None
 
@@ -390,78 +366,50 @@ def calculate_percent_parent_plot_threshold(plot_data):
     return float(mock_group_means.iloc[0]) * 2.0
 
 
-def generate_plots(df, target_cols, output_dir, mock_expression_threshold, export_png=False):
-    """Create and save all summary figures; return plot metadata + grouped data.
-
-    Notes:
-    - `export_png` is retained for CLI compatibility; PNG export is always on.
-    - Figure order and sample ordering are fixed for cross-report consistency.
-    - Uses explicit matplotlib bar positions to keep bars and SEM aligned.
-    """
-    validate_target_columns(target_cols, df.columns)
-
-    # Color mapping
-    color_map = {
-        'Negative Control': '#D3D3D3', # Light Grey
-        'Positive Control': '#FFB6C1', # Light Red
-        'Experimental Sample': '#ADD8E6' # Light Blue
-    }
-    
-    # Group by Sample Name and Type for plotting averages
-    # We want to keep the order from the mapping file if possible
-    # We use 'True Sample Name' and 'Sample Type' from the mapping file
-    # Aggregation is at sample-level mean ± SEM across replicates.
-    plot_data = df.groupby(['True Sample Name', 'Sample Type'], sort=False).agg({
-        target_cols['percent_parent']: ['mean', get_sem],
-        target_cols['mfi_ratio']: ['mean', get_sem],
-        target_cols['mfi_af488']: ['mean', get_sem],
-        target_cols['mirfp_expression']: ['mean', get_sem],
-    }).reset_index()
-    
-    # Flatten columns
-    plot_data.columns = ['Sample Name', 'Sample Type', 
-                         'percent_parent_mean', 'percent_parent_sem',
-                         'mfi_ratio_mean', 'mfi_ratio_sem',
-                         'mfi_af488_mean', 'mfi_af488_sem',
-                         'mirfp_expression_mean', 'mirfp_expression_sem']
-    percent_parent_threshold = calculate_percent_parent_plot_threshold(plot_data)
-    
-    metrics = [
-        {
-            "metric_id": "percent_parent",
-            "title": "Binding Competent Population (%Parent)",
-            "y_label": "Mean Binding Competent Population (%Parent)",
-            "filename": "percent_parent_plot.png",
-        },
-        {
-            "metric_id": "mirfp_expression",
-            "title": "Expression Level of Transfected Cells MFI_AF647",
-            "y_label": "Expression Level (MFI_AF647)",
-            "filename": "mirfp_expression_plot.png",
-        },
-        {
-            "metric_id": "mfi_ratio",
-            "title": "Binding Competent Population Single-Cell Ratio of AF488/AF647",
-            "y_label": "MFI (AF488/AF647)",
-            "filename": "mfi_ratio_plot.png",
-        },
-        {
-            "metric_id": "mfi_af488",
-            "title": "Binding Competent Population MFI_AF488",
-            "y_label": "MFI (AF488)",
-            "filename": "mfi_af488_plot.png",
-        },
+def build_plot_data(df, target_cols):
+    """Aggregate replicate-level rows into sample-level means and SEMs."""
+    grouped = (
+        df.groupby(["True Sample Name", "Sample Type"], sort=False)
+        .agg(
+            {
+                target_cols["percent_parent"]: ["mean", get_sem],
+                target_cols["mfi_ratio"]: ["mean", get_sem],
+                target_cols["mfi_af488"]: ["mean", get_sem],
+                target_cols["mirfp_expression"]: ["mean", get_sem],
+            }
+        )
+        .reset_index()
+    )
+    # Flatten MultiIndex columns created by grouped aggregation.
+    grouped.columns = [
+        "Sample Name",
+        "Sample Type",
+        "percent_parent_mean",
+        "percent_parent_sem",
+        "mfi_ratio_mean",
+        "mfi_ratio_sem",
+        "mfi_af488_mean",
+        "mfi_af488_sem",
+        "mirfp_expression_mean",
+        "mirfp_expression_sem",
     ]
+    return grouped
 
-    # For figures only: omit samples with "Mock" in the name.
-    figure_data = plot_data[~plot_data["Sample Name"].astype(str).str.contains("mock", case=False, na=False)].copy()
 
-    # Ordering for all figures:
-    # 1) Negative controls
-    # 2) Positive controls
-    # 3) Experimental samples (sorted by percent_parent_mean ascending)
+def build_figure_data(plot_data):
+    """Filter/sort rows used for all figures to keep ordering consistent."""
+    # Figures omit mock rows by requirement, while tables keep them.
+    figure_data = plot_data[
+        ~plot_data["Sample Name"].astype(str).str.contains("mock", case=False, na=False)
+    ].copy()
+
+    # Experimental bars are globally ordered by percent_parent_mean and reused across all plots.
     experimental_order = (
-        figure_data[figure_data["Sample Type"].astype(str).str.contains("experimental", case=False, na=False)]
+        figure_data[
+            figure_data["Sample Type"].astype(str).str.contains(
+                "experimental", case=False, na=False
+            )
+        ]
         .sort_values("percent_parent_mean", ascending=True)["Sample Name"]
         .tolist()
     )
@@ -469,115 +417,160 @@ def generate_plots(df, target_cols, output_dir, mock_expression_threshold, expor
 
     figure_data["sample_type_rank"] = figure_data["Sample Type"].apply(_sample_type_rank)
     figure_data["positive_rank"] = figure_data["Sample Name"].apply(_positive_control_rank)
-    figure_data["experimental_rank"] = figure_data["Sample Name"].map(experimental_rank).fillna(-1)
-    figure_data = figure_data.sort_values(
+    figure_data["experimental_rank"] = (
+        figure_data["Sample Name"].map(experimental_rank).fillna(-1)
+    )
+
+    return figure_data.sort_values(
         by=["sample_type_rank", "positive_rank", "experimental_rank", "Sample Name"],
         ascending=[True, True, True, True],
     ).drop(columns=["sample_type_rank", "positive_rank", "experimental_rank"])
 
-    plot_files = []
-    
-    for metric_cfg in metrics:
-        metric_id = metric_cfg["metric_id"]
-        fig, ax = plt.subplots(figsize=(14, 7))
-        x_positions = np.arange(len(figure_data))
-        means = figure_data[f"{metric_id}_mean"].to_numpy()
-        sems = figure_data[f"{metric_id}_sem"].to_numpy()
-        bar_colors = [color_map.get(sample_type, "#B0B0B0") for sample_type in figure_data["Sample Type"]]
 
-        # Draw bars and error bars together to keep a strict 1:1 row-to-bar mapping.
-        bars = ax.bar(
-            x_positions,
-            means,
-            yerr=sems,
-            capsize=3,
-            color=bar_colors,
-            edgecolor="black",
-            linewidth=0.5,
-            zorder=3,
+def draw_metric_plot(
+    ax,
+    figure_data,
+    metric_cfg,
+    mock_expression_threshold,
+    percent_parent_threshold,
+):
+    """Render one bar chart (mean ± SEM) with requested styling and thresholds."""
+    metric_id = metric_cfg["metric_id"]
+    x_positions = np.arange(len(figure_data))
+    means = figure_data[f"{metric_id}_mean"].to_numpy()
+    sems = figure_data[f"{metric_id}_sem"].to_numpy()
+    bar_colors = [COLOR_MAP.get(st, "#B0B0B0") for st in figure_data["Sample Type"]]
+
+    # Explicit bar + yerr keeps data-to-bar mapping deterministic.
+    bars = ax.bar(
+        x_positions,
+        means,
+        yerr=sems,
+        capsize=3,
+        color=bar_colors,
+        edgecolor="black",
+        linewidth=0.5,
+        zorder=3,
+    )
+
+    ax.set_title(metric_cfg["title"])
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(figure_data["Sample Name"], rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel(metric_cfg["y_label"])
+    ax.set_xlabel("Sample Name")
+
+    # Scale axis with headroom; ensure threshold line fits on mirfp expression plot.
+    y_max = float(np.nanmax(means)) if len(means) else 0.0
+    if metric_id == "mirfp_expression":
+        y_max = max(y_max, float(mock_expression_threshold))
+    ax.set_ylim(0, (y_max * 1.3) if y_max > 0 else 1.0)
+    ax.set_axisbelow(True)
+    ax.yaxis.grid(True, linestyle="--", linewidth=0.25, color="gray", alpha=0.7, which="major")
+
+    # Draw requested threshold reference lines.
+    if metric_id == "percent_parent" and percent_parent_threshold is not None:
+        ax.axhline(
+            y=percent_parent_threshold,
+            color="red",
+            linestyle="--",
+            linewidth=1.0,
+            zorder=2,
+        )
+    if metric_id == "mirfp_expression":
+        ax.axhline(
+            y=mock_expression_threshold,
+            color="red",
+            linestyle="--",
+            linewidth=1.0,
+            zorder=2,
         )
 
-        ax.set_title(metric_cfg["title"])
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(figure_data["Sample Name"], rotation=45, ha="right", fontsize=8)
-        ax.set_ylabel(metric_cfg["y_label"])
-        ax.set_xlabel("Sample Name")
-        y_max = float(np.nanmax(means)) if len(means) else 0.0
-        if metric_id == "mirfp_expression":
-            y_max = max(y_max, float(mock_expression_threshold))
-        ax.set_ylim(0, (y_max * 1.3) if y_max > 0 else 1.0)
-        ax.set_axisbelow(True)
-        # Grid is drawn behind bars to preserve bar readability.
-        ax.yaxis.grid(True, linestyle="--", linewidth=0.25, color="gray", alpha=0.7, which="major")
+    # Compose legend only for sample types present in the filtered figure data.
+    legend_order = ["Negative Control", "Positive Control", "Experimental Sample"]
+    present_types = figure_data["Sample Type"].dropna().astype(str).unique().tolist()
+    legend_handles = [
+        Patch(facecolor=COLOR_MAP[sample_type], edgecolor="black", label=sample_type)
+        for sample_type in legend_order
+        if sample_type in present_types
+    ]
 
-        if metric_id == "percent_parent" and percent_parent_threshold is not None:
-            ax.axhline(
-                    y=percent_parent_threshold,
-                    color="red",
-                    linestyle="--",
-                    linewidth=1.0,
-                    zorder=2,
-            )
-        if metric_id == "mirfp_expression":
-            ax.axhline(
-                y=mock_expression_threshold,
-                color="red",
-                linestyle="--",
-                linewidth=1.0,
-                zorder=2,
-            )
-
-        legend_order = ["Negative Control", "Positive Control", "Experimental Sample"]
-        present_types = figure_data["Sample Type"].dropna().astype(str).unique().tolist()
-        legend_handles = [
-            Patch(facecolor=color_map[sample_type], edgecolor="black", label=sample_type)
-            for sample_type in legend_order
-            if sample_type in present_types
-        ]
-        bars_need_hatch = []
-        if metric_id == "mirfp_expression":
-            # Hatch bars below expression threshold to flag insufficient expression.
-            for bar, mean_value in zip(bars, means):
-                if float(mean_value) < float(mock_expression_threshold):
-                    bar.set_hatch("//")
-                    bars_need_hatch.append(True)
-                else:
-                    bars_need_hatch.append(False)
-            if any(bars_need_hatch):
-                legend_handles.append(
-                    Patch(
-                        facecolor="white",
-                        edgecolor="black",
-                        hatch="//",
-                        label="Insufficient Expression",
-                    )
+    # Hatch insufficient-expression bars and add legend entry when applicable.
+    if metric_id == "mirfp_expression":
+        has_hatched = False
+        for bar, mean_value in zip(bars, means):
+            if float(mean_value) < float(mock_expression_threshold):
+                bar.set_hatch("//")
+                has_hatched = True
+        if has_hatched:
+            legend_handles.append(
+                Patch(
+                    facecolor="white",
+                    edgecolor="black",
+                    hatch="//",
+                    label="Insufficient Expression",
                 )
-        if legend_handles:
-            ax.legend(handles=legend_handles, title="Sample Type", loc="upper right")
+            )
+
+    if legend_handles:
+        ax.legend(handles=legend_handles, title="Sample Type", loc="upper right")
+
+
+def generate_plots(df, target_cols, output_dir, mock_expression_threshold, export_png=False):
+    """Generate and save all figures; return filenames + aggregated plot dataset."""
+    # Retained for CLI compatibility; this script always exports PNGs.
+    del export_png
+    validate_target_columns(target_cols, df.columns)
+
+    # Shared sample ordering across all metrics prevents visual reordering confusion.
+    plot_data = build_plot_data(df, target_cols)
+    figure_data = build_figure_data(plot_data)
+    percent_parent_threshold = calculate_percent_parent_plot_threshold(plot_data)
+
+    # Iterate metric configuration so title/axis/file naming stays centralized.
+    plot_files = []
+    for metric_cfg in METRIC_CONFIGS:
+        fig, ax = plt.subplots(figsize=(14, 7))
+        draw_metric_plot(
+            ax,
+            figure_data,
+            metric_cfg,
+            mock_expression_threshold,
+            percent_parent_threshold,
+        )
         fig.tight_layout()
-        
+
         filename = os.path.join(output_dir, metric_cfg["filename"])
-        # Save as 150 dpi to reduce file size.
-        fig.savefig(filename, dpi=150, bbox_inches='tight')
-        plot_files.append((metric_cfg["title"], metric_cfg["filename"]))
+        fig.savefig(filename, dpi=150, bbox_inches="tight")
         print(f"Exported {filename}")
-            
         plt.close(fig)
-        
+
+        plot_files.append((metric_cfg["title"], metric_cfg["filename"]))
+
     return plot_files, plot_data, percent_parent_threshold
 
+
 def _format_sample_list(sample_names):
-    """Format sample-name lists for readable markdown bullet output."""
+    """Human-readable sample list for markdown bullet points."""
     return ", ".join(sample_names) if sample_names else "None"
 
 
-def generate_report(plot_data, plot_files, target_cols, output_dir, mock_expression_threshold, percent_parent_threshold):
-    """Write markdown report with key findings, summary table, and figure links."""
+def generate_report(
+    plot_data,
+    plot_files,
+    target_cols,
+    output_dir,
+    mock_expression_threshold,
+    percent_parent_threshold,
+):
+    """Build markdown report: key findings, summary table, and figure references."""
+    # Kept in signature for compatibility with caller shape.
+    del target_cols, percent_parent_threshold
+
     output_path = os.path.join(output_dir, "experiment_summary.md")
     with open(output_path, "w") as f:
         f.write("# Flow Cytometry Analysis Summary\n\n")
 
-        # Subset 1: experimental samples above expression threshold.
+        # Key Findings subset 1: experimental samples above expression threshold.
         experimental_samples = plot_data[
             plot_data["Sample Type"].astype(str).str.contains("experimental", case=False, na=False)
         ].copy()
@@ -586,7 +579,7 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
         ].copy()
         passed_expression_names = passed_expression["Sample Name"].astype(str).tolist()
 
-        # Subset 2: from subset 1, samples above 2x FLAG %Parent threshold.
+        # Key Findings subset 2: from subset 1, samples above 2x FLAG %Parent threshold.
         key_findings_flag_threshold = calculate_percent_parent_threshold(plot_data)
         if key_findings_flag_threshold is None:
             passed_percent_parent = passed_expression.iloc[0:0].copy()
@@ -596,11 +589,11 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
             ].copy()
         passed_percent_parent_names = passed_percent_parent["Sample Name"].astype(str).tolist()
 
+        # Key Findings subset 3: from subset 2, samples above average control ratio.
         controls = plot_data[
             plot_data["Sample Type"].astype(str).str.contains("negative|positive", case=False, na=False)
         ]
         controls_ratio_mean = float(controls["mfi_ratio_mean"].mean()) if not controls.empty else float("nan")
-        # Subset 3: from subset 2, samples above average control ratio.
         passed_ratio = passed_percent_parent[
             passed_percent_parent["mfi_ratio_mean"] > controls_ratio_mean
         ].copy()
@@ -632,28 +625,25 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
                 f"({controls_ratio_mean:.2f}): {len(passed_ratio_names)} "
                 f"({_format_sample_list(passed_ratio_names)})\n\n"
             )
-        
+
+        # Build table columns with user-requested naming/ordering.
         f.write("## Data Table\n\n")
-        # Format table for markdown
         table_df = plot_data.copy()
-        
-        # Map back to original column names for the table headers if desired, 
-        # but let's use cleaner names for the table.
         display_cols = {
-            'Sample Name': 'Sample Name',
-            'Sample Type': 'Sample Type',
-            'mock_expression_pass': '>2X Mock Expression',
-            'mirfp_expression': 'Expression Level (MFI_AF647)',
-            'percent_parent': 'Singlets/AF647(+)/AF488(+) %Parent',
-            'mfi_ratio': 'MFI Ratio (AF488/AF647)',
-            'mfi_af488': 'MFI AF488'
+            "Sample Name": "Sample Name",
+            "Sample Type": "Sample Type",
+            "mock_expression_pass": ">2X Mock Expression",
+            "mirfp_expression": "Expression Level (MFI_AF647)",
+            "percent_parent": "Singlets/AF647(+)/AF488(+) %Parent",
+            "mfi_ratio": "MFI Ratio (AF488/AF647)",
+            "mfi_af488": "MFI AF488",
         }
 
-        table_df[display_cols['mock_expression_pass']] = table_df.apply(
+        # Mark mock rows as "No" by design for pass/fail display.
+        table_df[display_cols["mock_expression_pass"]] = table_df.apply(
             lambda row: (
                 "Yes"
                 if (
-                    # Mock rows are intentionally marked "No" in pass/fail output.
                     "mock" not in str(row["Sample Name"]).lower()
                     and float(row["mirfp_expression_mean"]) > float(mock_expression_threshold)
                 )
@@ -661,50 +651,59 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
             ),
             axis=1,
         )
-        
-        for metric in ['mirfp_expression', 'percent_parent', 'mfi_ratio', 'mfi_af488']:
-            table_df[display_cols[metric]] = table_df.apply(lambda r: f"{r[metric+'_mean']:.2f} ± {r[metric+'_sem']:.2f}", axis=1)
-        
+
+        # Format aggregated values as "mean ± sem" strings for readability.
+        for metric in ("mirfp_expression", "percent_parent", "mfi_ratio", "mfi_af488"):
+            table_df[display_cols[metric]] = table_df.apply(
+                lambda r: f"{r[metric + '_mean']:.2f} ± {r[metric + '_sem']:.2f}",
+                axis=1,
+            )
+
         final_table = table_df[
-            ['Sample Name', 'Sample Type', display_cols['mock_expression_pass']]
-            + [display_cols[m] for m in ['mirfp_expression', 'percent_parent', 'mfi_ratio', 'mfi_af488']]
+            ["Sample Name", "Sample Type", display_cols["mock_expression_pass"]]
+            + [display_cols[m] for m in ("mirfp_expression", "percent_parent", "mfi_ratio", "mfi_af488")]
         ]
         f.write(final_table.to_markdown(index=False))
         f.write("\n\n")
-        
+
+        # Use markdown links to local PNG files (no base64 embedding).
         f.write("## Figures\n\n")
         for title, png_filename in plot_files:
             f.write(f"### {title}\n")
             f.write(f"![{title}]({png_filename})\n\n")
-            
+
     print(f"Generated {output_path}")
 
+
 def main():
-    """CLI entrypoint for end-to-end analysis workflow."""
+    """CLI entrypoint for the end-to-end analysis/report generation workflow."""
     parser = argparse.ArgumentParser(description="Analyze Flow Cytometry Data")
     parser.add_argument("data_dir", help="Path to directory containing raw CSV and plate mapping CSV")
     parser.add_argument("--export-png", action="store_true", help="Export plots as PNG files")
     args = parser.parse_args()
-    
+
     try:
-        # 1) Resolve output location and clean/merge source files.
+        # 1) Resolve output location and merge cleaned data.
         output_dir = get_output_dir(args.data_dir)
         print(f"Writing outputs to: {output_dir}")
 
         merged_df = clean_and_merge(args.data_dir, output_dir)
-
-        # 2) Resolve metric columns and compute analysis thresholds.
+        # 2) Identify metric columns and compute threshold(s).
         target_cols = identify_columns(merged_df)
         validate_target_columns(target_cols, merged_df.columns)
         mock_expression_threshold = calculate_mock_expression_threshold(merged_df, target_cols)
-        
+
         print("Identified target columns:")
         for k, v in target_cols.items():
             print(f"  {k}: {v}")
 
-        # 3) Generate figures and markdown summary report.
+        # 3) Generate figures and markdown report from aggregated data.
         plot_files, plot_data, percent_parent_threshold = generate_plots(
-            merged_df, target_cols, output_dir, mock_expression_threshold, args.export_png
+            merged_df,
+            target_cols,
+            output_dir,
+            mock_expression_threshold,
+            args.export_png,
         )
         generate_report(
             plot_data,
@@ -714,11 +713,13 @@ def main():
             mock_expression_threshold,
             percent_parent_threshold,
         )
-        
     except Exception as e:
+        # Preserve full traceback for faster debugging in local runs.
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()
