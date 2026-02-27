@@ -1,3 +1,23 @@
+"""Flow cytometry analysis pipeline.
+
+This script takes a directory containing two CSV inputs:
+1) Raw FlowJo-exported results.
+2) Plate mapping metadata (sample name mapping, sample type, replicate).
+
+It produces three output artifacts in a project-local output folder:
+- `processed_flow_data.csv` (cleaned + merged per-row data)
+- `experiment_summary.md` (key findings + summary table + figure links)
+- Four PNG figures (bar charts with mean ± SEM)
+
+Core responsibilities:
+- Locate and validate expected input files.
+- Clean known raw-data artifacts ("Mean"/"SD" rows).
+- Resolve mapping column names robustly even with formatting variations.
+- Fail fast when mapping metadata is incomplete.
+- Compute requested thresholds and summary metrics.
+- Render consistently ordered figures with styling and threshold overlays.
+"""
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
@@ -11,6 +31,12 @@ REQUIRED_MAPPING_COLUMNS = ("Sample Name", "Updated Sample Name", "Sample Type",
 
 
 def get_output_dir(data_dir):
+    """Return/create the project-local output directory for a given dataset path.
+
+    The output folder name is derived from the input folder name:
+    `<input_folder>_analyzed_data`
+    and is always created inside the same directory as this script.
+    """
     input_dir = os.path.abspath(os.path.normpath(data_dir))
     input_name = os.path.basename(input_dir)
     project_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,10 +46,25 @@ def get_output_dir(data_dir):
 
 
 def clean_and_merge(data_dir, output_dir):
+    """Load raw + mapping CSVs, clean artifacts, merge metadata, and export CSV.
+
+    Steps:
+    - Discover raw and mapping CSVs (top-level first, then one nested level).
+    - Remove known artifact rows ("Mean", "SD") from raw data.
+    - Normalize/validate required mapping columns.
+    - Left-merge mapping metadata onto each raw sample row.
+    - Fail explicitly if any sample lacks required metadata.
+    - Reformat columns for the exported intermediate CSV.
+    """
     # 1. Locate files
     files = os.listdir(data_dir)
 
     def pick_csvs_from_dir(dir_path):
+        """Pick the first matching raw and mapping CSV from a directory.
+
+        Matching is intentionally flexible for raw file names to handle
+        naming differences across exports (FlowJo table / ratio reanalysis).
+        """
         local_raw = None
         local_mapping = None
         for name in os.listdir(dir_path):
@@ -84,6 +125,8 @@ def clean_and_merge(data_dir, output_dir):
     
     # 4. Merge
     # We'll merge on the first column of raw_df and 'Sample Name' in mapping_df
+    # Left join preserves every raw row so analysis never silently drops
+    # a sample that appeared in the instrument export.
     merged_df = pd.merge(
         raw_df, 
         mapping_df, 
@@ -126,6 +169,7 @@ def clean_and_merge(data_dir, output_dir):
         merged_df = merged_df.drop(columns=drop_unnamed_cols, errors="ignore")
 
     # Ensure metadata columns are front-loaded in the output CSV.
+    # This keeps the exported table human-readable and consistent between runs.
     leading_cols = ["Sample Name", "True Sample Name", "Sample Type", "Replicate"]
     remaining_cols = [col for col in merged_df.columns if col not in leading_cols]
     merged_df = merged_df[leading_cols + remaining_cols]
@@ -138,6 +182,18 @@ def clean_and_merge(data_dir, output_dir):
     return merged_df
 
 def identify_columns(df):
+    """Identify FlowJo metric columns using pattern-based matching.
+
+    Returns:
+        dict with canonical keys:
+          - percent_parent
+          - mfi_ratio
+          - mfi_af488
+          - mirfp_expression
+
+    The script uses canonical keys downstream so analysis logic is independent
+    from exact raw CSV column ordering.
+    """
     cols = df.columns
     target_cols = {}
     
@@ -173,10 +229,16 @@ def identify_columns(df):
 
 
 def _normalize_column_name(name):
+    """Normalize a column name to alphanumeric lowercase for fuzzy matching."""
     return "".join(ch for ch in str(name).strip().lower() if ch.isalnum())
 
 
 def resolve_mapping_columns(mapping_columns):
+    """Resolve required mapping columns even with spacing/case differences.
+
+    Example: " Updated Sample Name " and "updatedsamplename" both normalize
+    to the same key and can be matched reliably.
+    """
     normalized = {_normalize_column_name(col): col for col in mapping_columns}
     required_norm = {_normalize_column_name(col): col for col in REQUIRED_MAPPING_COLUMNS}
 
@@ -201,6 +263,7 @@ def resolve_mapping_columns(mapping_columns):
 
 
 def validate_target_columns(target_cols, available_columns):
+    """Ensure all required metrics were discovered before analysis proceeds."""
     missing = [key for key in REQUIRED_METRIC_KEYS if key not in target_cols]
     if not missing:
         return
@@ -215,9 +278,11 @@ def validate_target_columns(target_cols, available_columns):
     )
 
 def get_sem(x):
+    """Compute standard error of the mean (SEM); 0 when only one replicate."""
     return x.std() / np.sqrt(len(x)) if len(x) > 1 else 0
 
 def _sample_type_rank(sample_type):
+    """Sort key for global plot ordering: Negative, Positive, Experimental."""
     sample_type_norm = str(sample_type).strip().lower()
     if "negative" in sample_type_norm:
         return 0
@@ -227,6 +292,7 @@ def _sample_type_rank(sample_type):
 
 
 def _positive_control_rank(sample_name):
+    """Secondary sort key for positive controls to keep expected visual order."""
     sample_name_norm = str(sample_name).strip().lower()
     if "a-his" in sample_name_norm:
         return 0
@@ -236,11 +302,18 @@ def _positive_control_rank(sample_name):
 
 
 def calculate_mock_expression_threshold(df, target_cols):
+    """Compute expression threshold = 2x mean(mock_His/mock_FLAG expression).
+
+    Search order:
+    1) "Sample Name"
+    2) "True Sample Name" (fallback if no matches in #1)
+    """
     expression_col = target_cols["mirfp_expression"]
     expression_values = pd.to_numeric(df[expression_col], errors="coerce")
     sample_names = df["Sample Name"].astype(str)
 
     def build_mock_mask(name_series):
+        """True for names containing "mock" and at least one of "his"/"flag"."""
         return (
             name_series.str.contains("mock", case=False, na=False)
             & (
@@ -265,6 +338,10 @@ def calculate_mock_expression_threshold(df, target_cols):
 
 
 def calculate_percent_parent_threshold(plot_data):
+    """Compute key-findings threshold = 2x best non-mock FLAG %Parent mean.
+
+    If no qualifying non-mock FLAG sample exists, return None.
+    """
     true_sample_names = plot_data["Sample Name"].astype(str)
 
     # Primary rule: use True Sample Name values containing FLAG but not mock.
@@ -285,6 +362,12 @@ def calculate_percent_parent_threshold(plot_data):
 
 
 def calculate_percent_parent_plot_threshold(plot_data):
+    """Compute plotting threshold for %Parent horizontal reference line.
+
+    Preference:
+    1) Use non-mock FLAG threshold (same logic as key findings)
+    2) Fallback to strongest mock group threshold for visual guidance
+    """
     # Prefer FLAG-based threshold for plotting.
     flag_threshold = calculate_percent_parent_threshold(plot_data)
     if flag_threshold is not None:
@@ -308,6 +391,13 @@ def calculate_percent_parent_plot_threshold(plot_data):
 
 
 def generate_plots(df, target_cols, output_dir, mock_expression_threshold, export_png=False):
+    """Create and save all summary figures; return plot metadata + grouped data.
+
+    Notes:
+    - `export_png` is retained for CLI compatibility; PNG export is always on.
+    - Figure order and sample ordering are fixed for cross-report consistency.
+    - Uses explicit matplotlib bar positions to keep bars and SEM aligned.
+    """
     validate_target_columns(target_cols, df.columns)
 
     # Color mapping
@@ -320,6 +410,7 @@ def generate_plots(df, target_cols, output_dir, mock_expression_threshold, expor
     # Group by Sample Name and Type for plotting averages
     # We want to keep the order from the mapping file if possible
     # We use 'True Sample Name' and 'Sample Type' from the mapping file
+    # Aggregation is at sample-level mean ± SEM across replicates.
     plot_data = df.groupby(['True Sample Name', 'Sample Type'], sort=False).agg({
         target_cols['percent_parent']: ['mean', get_sem],
         target_cols['mfi_ratio']: ['mean', get_sem],
@@ -416,6 +507,7 @@ def generate_plots(df, target_cols, output_dir, mock_expression_threshold, expor
             y_max = max(y_max, float(mock_expression_threshold))
         ax.set_ylim(0, (y_max * 1.3) if y_max > 0 else 1.0)
         ax.set_axisbelow(True)
+        # Grid is drawn behind bars to preserve bar readability.
         ax.yaxis.grid(True, linestyle="--", linewidth=0.25, color="gray", alpha=0.7, which="major")
 
         if metric_id == "percent_parent" and percent_parent_threshold is not None:
@@ -444,6 +536,7 @@ def generate_plots(df, target_cols, output_dir, mock_expression_threshold, expor
         ]
         bars_need_hatch = []
         if metric_id == "mirfp_expression":
+            # Hatch bars below expression threshold to flag insufficient expression.
             for bar, mean_value in zip(bars, means):
                 if float(mean_value) < float(mock_expression_threshold):
                     bar.set_hatch("//")
@@ -474,14 +567,17 @@ def generate_plots(df, target_cols, output_dir, mock_expression_threshold, expor
     return plot_files, plot_data, percent_parent_threshold
 
 def _format_sample_list(sample_names):
+    """Format sample-name lists for readable markdown bullet output."""
     return ", ".join(sample_names) if sample_names else "None"
 
 
 def generate_report(plot_data, plot_files, target_cols, output_dir, mock_expression_threshold, percent_parent_threshold):
+    """Write markdown report with key findings, summary table, and figure links."""
     output_path = os.path.join(output_dir, "experiment_summary.md")
     with open(output_path, "w") as f:
         f.write("# Flow Cytometry Analysis Summary\n\n")
 
+        # Subset 1: experimental samples above expression threshold.
         experimental_samples = plot_data[
             plot_data["Sample Type"].astype(str).str.contains("experimental", case=False, na=False)
         ].copy()
@@ -490,6 +586,7 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
         ].copy()
         passed_expression_names = passed_expression["Sample Name"].astype(str).tolist()
 
+        # Subset 2: from subset 1, samples above 2x FLAG %Parent threshold.
         key_findings_flag_threshold = calculate_percent_parent_threshold(plot_data)
         if key_findings_flag_threshold is None:
             passed_percent_parent = passed_expression.iloc[0:0].copy()
@@ -503,6 +600,7 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
             plot_data["Sample Type"].astype(str).str.contains("negative|positive", case=False, na=False)
         ]
         controls_ratio_mean = float(controls["mfi_ratio_mean"].mean()) if not controls.empty else float("nan")
+        # Subset 3: from subset 2, samples above average control ratio.
         passed_ratio = passed_percent_parent[
             passed_percent_parent["mfi_ratio_mean"] > controls_ratio_mean
         ].copy()
@@ -555,6 +653,7 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
             lambda row: (
                 "Yes"
                 if (
+                    # Mock rows are intentionally marked "No" in pass/fail output.
                     "mock" not in str(row["Sample Name"]).lower()
                     and float(row["mirfp_expression_mean"]) > float(mock_expression_threshold)
                 )
@@ -581,16 +680,20 @@ def generate_report(plot_data, plot_files, target_cols, output_dir, mock_express
     print(f"Generated {output_path}")
 
 def main():
+    """CLI entrypoint for end-to-end analysis workflow."""
     parser = argparse.ArgumentParser(description="Analyze Flow Cytometry Data")
     parser.add_argument("data_dir", help="Path to directory containing raw CSV and plate mapping CSV")
     parser.add_argument("--export-png", action="store_true", help="Export plots as PNG files")
     args = parser.parse_args()
     
     try:
+        # 1) Resolve output location and clean/merge source files.
         output_dir = get_output_dir(args.data_dir)
         print(f"Writing outputs to: {output_dir}")
 
         merged_df = clean_and_merge(args.data_dir, output_dir)
+
+        # 2) Resolve metric columns and compute analysis thresholds.
         target_cols = identify_columns(merged_df)
         validate_target_columns(target_cols, merged_df.columns)
         mock_expression_threshold = calculate_mock_expression_threshold(merged_df, target_cols)
@@ -598,7 +701,8 @@ def main():
         print("Identified target columns:")
         for k, v in target_cols.items():
             print(f"  {k}: {v}")
-            
+
+        # 3) Generate figures and markdown summary report.
         plot_files, plot_data, percent_parent_threshold = generate_plots(
             merged_df, target_cols, output_dir, mock_expression_threshold, args.export_png
         )
